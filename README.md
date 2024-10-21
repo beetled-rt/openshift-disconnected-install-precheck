@@ -29,14 +29,15 @@ Running this pre-check script helps identify potential issues that could hinder 
 2. **FIPS Mode:** Checks if FIPS mode is enabled.
 3. **`oc` CLI Version:** Verifies the installed version of the `oc` CLI tool.
 4. **`oc-mirror` CLI Version:** Verifies the installed version of the `oc-mirror` CLI tool.
-5. **Required DNS Entries:** Ensures that necessary DNS entries for OpenShift are present.
-6. **Disk Space for Registry Images:** Checks available disk space for registry images.
-7. **Registry Host Resources:** Verifies CPU and memory resources on the registry host.
-8. **Network Statistics:** Provides network connectivity statistics.
-9. **NTP Configuration:** Ensures NTP is configured on the registry host.
-10. **Certificates:** Checks for the presence of valid certificates.
-11. **Umask Setting:** Verifies the umask setting on the registry host.
-12. **Registry Accessibility:** Checks if the mirror registry is accessible.
+5. **`openshift-install` CLI Version:** Verifies the installed version of the `openshift-install` CLI tool.
+6. **Required DNS Entries:** Ensures that necessary DNS entries for OpenShift are present.
+7. **Disk Space for Registry Images:** Checks available disk space for registry images.
+8. **Registry Host Resources:** Verifies CPU and memory resources on the registry host.
+9. **Network Statistics:** Provides network connectivity statistics.
+10. **NTP Configuration:** Ensures NTP is configured on the registry host.
+11. **Certificates:** Checks for the presence of valid certificates.
+12. **Umask Setting:** Verifies the umask setting on the registry host.
+13. **Registry Accessibility:** Checks if the mirror registry is accessible.
 
 ## How to Use
 
