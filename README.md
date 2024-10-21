@@ -1,4 +1,5 @@
 
+
 # OpenShift Installation Pre-Check Script
 
 ## Overview
@@ -69,6 +70,11 @@ The script can be run using a configuration file or command-line parameters.
 - `-v, --verbose`: Enable verbose output.
 - `-o, --output FILE`: Specify the output file (default: ./healthcheck_report.txt).
 - `--create-config`: Create an example config.ini file with sample values.
+- `--ssh-opts`: Include additional command line params for ssh executions (i.e. "--ssh-opts '-i /path/to/key_file'").
+- `--ocbin_local`: Determine binary's version using localhost instanes (integer value [0 or 1]).
+- `--oc_path`: Explicit path for 'oc' binary.
+- `--oc_mirror_path`: Explicit path for 'oc-mirror' binary.
+- `--openshift_install_path`: Explicit path for 'openshift-install' binary.
 
 ### Generating an Output File
 

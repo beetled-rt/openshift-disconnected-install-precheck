@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash +x
 
 # This file is part of the OpenShift Installation Pre-Check Script.
 #
@@ -84,7 +84,7 @@
 #    - Fail Criteria: The package is not installed.
 #    - Solution: Install pexpect using `pip3 install pexpect`.
 
-# 10. Ensure lattest version of Installer (if appropriate?)
+# 10. Ensure latest version of Installer (if appropriate?)
 #    - add installer version verification same way oc and oc-mirror are being done.
 #    - Validation Command: `oc version`, `openshift-install version`, `oc-mirror version`
 #    - Pass Criteria: The latest versions are installed.
@@ -128,17 +128,21 @@ show_help() {
     echo "This script can be run either using a configuration file or command-line parameters."
     echo ""
     echo "Options:"
-    echo "  -h, --help              Show this help message"
-    echo "  -c, --config FILE       Specify the configuration file"
-    echo "  --ocp_version VERSION   Specify the OCP version"
-    echo "  --registry_host HOST    Specify the registry host"
-    echo "  --dns_base BASE         Specify the DNS base"
-    echo "  --registry_path PATH    Specify the registry path"
-    echo "  --cert_path PATH        Specify the certificate path"
-    echo "  --username USER         Specify the SSH username"
-    echo "  -v, --verbose           Enable verbose output"
-    echo "  -o, --output FILE       Specify the output file (default: ./healthcheck_report.txt)"
-    echo "  --create-config         Create an example config.ini file with sample values"
+    echo "  -h, --help                      Show this help message"
+    echo "  -c, --config FILE               Specify the configuration file"
+    echo "  --ocp_version VERSION           Specify the OCP version"
+    echo "  --registry_host HOST            Specify the registry host"
+    echo "  --dns_base BASE                 Specify the DNS base"
+    echo "  --registry_path PATH            Specify the registry path"
+    echo "  --cert_path PATH                Specify the certificate path"
+    echo "  --username USER                 Specify the SSH username"
+    echo "  -v, --verbose                   Enable verbose output"
+    echo "  -o, --output FILE               Specify the output file (default: ./healthcheck_report.txt)"
+    echo "  --create-config                 Create an example config.ini file with sample values"
+    echo "  --ssh-opts                      Additional SSH command line paramers"
+    echo "  --oc_path                       Specify path for 'oc' binary"
+    echo "  --oc_mirror_path                Specify path for 'oc-mirror' binary"
+    echo "  --openshift-install_path        Specify path for 'openshift-install' binary"
     echo ""
     echo "Example commands:"
     echo "  Using a configuration file:"
@@ -166,6 +170,13 @@ registry_host = localhost
 # The base domain for required DNS entries
 dns_base = example.com
 
+[binaries]
+# Whether the "oc/oc-mirror" binaries are local (on host running script) or remote "registry" host
+local = 0
+#oc_path = <path>                         # When not specified, expects to be on 'path'
+#oc_mirror_path = <path>                  # When not specified, expects to be on 'path' 
+#openshift_install_path = <path>          # When not specified, expects to be on 'path'
+
 [registry]
 # The path to the directory where registry images are stored
 registry_path = /var/lib/registry
@@ -177,6 +188,12 @@ cert_path = /etc/ssl/certs/registry.crt
 [ssh]
 # The SSH username for the registry host
 username = myuser
+
+# The SSH username for the registry host
+username = myuser
+
+# Additional CLI params for SSH invocations
+add_opts = -i '/path/to/key_file'
 EOL
 
     echo "Example config.ini file created in the current directory."
@@ -193,6 +210,11 @@ REGISTRY_PATH=""
 CERT_PATH=""
 SSH_USERNAME=""
 OUTPUT_FILE="./healthcheck_report.txt"  # Default output file
+SSH_OPTS=""
+OCBIN_LOCAL=0
+OC_PATH=""
+OC_MIRROR_PATH=""
+OPENSHIFT_INSTALL_PATH=""
 
 # Hardcoded minimum values
 MIN_CPU_CONTROL_PLANE=4        # Hardcoded minimum CPU for control plane
@@ -230,6 +252,11 @@ load_config() {
         REGISTRY_PATH=$(parse_value "registry" "registry_path")
         CERT_PATH=$(parse_value "certificates" "cert_path")
         SSH_USERNAME=$(parse_value "ssh" "username")
+        SSH_OPTS=$(parse_value "ssh" "add_opts")
+        OCBIN_LOCAL=$(parse_value "binaries" "local")
+        OC_PATH=$(parse_value "binaries" "oc_path")
+        OC_MIRROR_PATH=$(parse_value "binaries" "oc_mirror_path")
+        OPENSHIFT_INSTALL_PATH=$(parse_value "binaries" "openshift_install_path")
         echo "Configuration loaded:"
         echo "OCP Version: $OCP_VERSION"
         echo "Registry Host: $REGISTRY_HOST"
@@ -237,6 +264,11 @@ load_config() {
         echo "Registry Path: $REGISTRY_PATH"
         echo "Certificate Path: $CERT_PATH"
         echo "SSH Username: $SSH_USERNAME"
+        echo "SSH Options: $SSH_OPTS"
+        echo "OC Binaries Local: $OCBIN_LOCAL"
+        echo "'oc' Binary Path: $OC_PATH"
+        echo "'oc-mirror' Binary Path: $OC_MIRROR_PATH"
+        echo "'openshift-install' Binary Path: $OPENSHIFT_INSTALL_PATH"
         echo ""
     else
         echo "No configuration file found, using default values."
@@ -307,6 +339,11 @@ while [[ "$#" -gt 0 ]]; do
         -v|--verbose) VERBOSE=1; shift ;;
         -o|--output) OUTPUT_FILE="$2"; shift 2 ;;
         --create-config) CREATE_CONFIG=1; shift ;;
+        --ssh-opts) SSH_OPTS="$2"; shift 2 ;;
+        --ocbin_local) OCBIN_LOCAL="$2"; shift 2 ;;
+        --oc_path) OC_PATH="$2"; shift 2 ;;
+        --oc_mirror_path) OC_MIRROR_PATH="$2"; shift 2 ;;
+        --openshift_install_path) OPENSHIFT_INSTALL_PATH="$2"; shift 2 ;;
         --) shift; break ;;
         -*) echo "Unknown option: $1" >&2; show_help; exit 1 ;;
         *) break ;;
@@ -327,7 +364,7 @@ check_fips_mode() {
     if [[ "$REGISTRY_HOST" == "localhost" ]]; then
         fips_status=$(fips-mode-setup --check)
     else
-        fips_status=$(ssh "$SSH_USERNAME@$REGISTRY_HOST" "fips-mode-setup --check")
+        fips_status=$(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "fips-mode-setup --check")
     fi
 
     if echo "$fips_status" | grep -q "FIPS mode is enabled"; then
@@ -349,7 +386,11 @@ check_fapolicyd_active() {
     if [[ "$REGISTRY_HOST" == "localhost" ]]; then
         fapolicyd_status=$(systemctl is-active fapolicyd.service)
     else
-        fapolicyd_status=$(ssh "$SSH_USERNAME@$REGISTRY_HOST" "systemctl is-active fapolicyd.service")
+        if [[ "$OCBIN_LOCAL" -eq 1 ]]; then
+            fapolicyd_status=$(systemctl is-active fapolicyd.service)
+        else
+            fapolicyd_status=$(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "systemctl is-active fapolicyd.service")
+        fi
     fi
 
     if [[ "$fapolicyd_status" == "active" ]]; then
@@ -368,13 +409,34 @@ check_fapolicyd_binaries() {
     local failed_binaries=()
 
     for binary in "${binaries[@]}"; do
+        binary_full_path='${binary}'
+        if [ "$binary" == "oc" ] -a [ "$OC_PATH" != "" ]; then
+            binary_full_path='$OC_PATH';
+        else
+            if [ "$binary" == "oc-mirror" ] && [ "$OC_MIRROR_PATH" != "" ]; then
+                binary_full_path='$OC_MIRROR_PATH';
+               if [ "$binary" == "openshift-install" ] && [ "$OPENSHIFT_INSTALL_PATH" != "" ]; then
+                   binary_full_path='$OPENSHIFT_INSTALL_PATH';
+               fi
+            fi
+        fi
+        log "INFO" "Evaluating based on '${binary_full_path}'."
         if [[ "$REGISTRY_HOST" == "localhost" ]]; then
-            if ! fapolicyd-cli --list | grep -q "/usr/local/bin/$binary"; then
+            #if ! fapolicyd-cli --list | grep -q "/usr/local/bin/$binary"; then
+            if ! fapolicyd-cli --list | grep -q "$binary_full_path"; then
                 failed_binaries+=("$binary")
             fi
         else
-            if ! ssh "$SSH_USERNAME@$REGISTRY_HOST" "fapolicyd-cli --list | grep -q '/usr/local/bin/$binary'"; then
-                failed_binaries+=("$binary")
+            if [[ "$OCBIN_LOCAL" -eq 1 ]]; then
+                #if ! fapolicyd-cli --list | grep -q '/usr/local/bin/$binary'; then
+                if ! fapolicyd-cli --list | grep -q '$binary_full_path'; then
+                    failed_binaries+=("$binary")
+                fi
+            else
+                #if ! ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "fapolicyd-cli --list | grep -q '/usr/local/bin/$binary'"; then
+                if ! ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "fapolicyd-cli --list | grep -q '$binary_full_path'"; then
+                    failed_binaries+=("$binary")
+                fi
             fi
         fi
     done
@@ -400,7 +462,7 @@ check_user_namespaces() {
     if [[ "$REGISTRY_HOST" == "localhost" ]]; then
         current_value=$(sysctl -n user.max_user_namespaces 2>/dev/null)
     else
-        current_value=$(ssh "$SSH_USERNAME@$REGISTRY_HOST" "sysctl -n user.max_user_namespaces")
+        current_value=$(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "sysctl -n user.max_user_namespaces")
     fi
 
     if [[ "$current_value" -ge 100 ]]; then
@@ -426,12 +488,12 @@ check_user_namespaces() {
                 fi
             done
         else
-            if ssh "$SSH_USERNAME@$REGISTRY_HOST" "grep -q 'user.max_user_namespaces' /etc/sysctl.conf"; then
+            if ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "grep -q 'user.max_user_namespaces' /etc/sysctl.conf"; then
                 setting_files+=("/etc/sysctl.conf")
             fi
 
-            for file in $(ssh "$SSH_USERNAME@$REGISTRY_HOST" "ls /etc/sysctl.d/*.conf"); do
-                if ssh "$SSH_USERNAME@$REGISTRY_HOST" "grep -q 'user.max_user_namespaces' $file"; then
+            for file in $(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "ls /etc/sysctl.d/*.conf"); do
+                if ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "grep -q 'user.max_user_namespaces' $file"; then
                     setting_files+=("$file")
                 fi
             done
@@ -471,21 +533,36 @@ get_os_and_version() {
 check_oc_cli_version() {
     echo -e "\n===============================================" | tee -a "$OUTPUT_FILE"
     local required_version="$OCP_VERSION"
-    local majorvar minorvar patchvar
+    local current_version majorvar minorvar patchvar oc_full_path
     majorvar=$(echo "$required_version" | cut -d. -f1)
     minorvar=$(echo "$required_version" | cut -d. -f2)
     patchvar=$(echo "$required_version" | cut -d. -f3)
 
-    echo "Checking 'oc' CLI version on registry host" | tee -a "$OUTPUT_FILE"
-    if [[ "$REGISTRY_HOST" == "localhost" ]]; then
-        current_version=$(oc version --client 2>&1 | grep 'Client Version' | awk '{print $3}')
+    if [ "$OC_PATH" != "" ]; then
+        oc_full_path="$OC_PATH";
     else
-        current_version=$(ssh "$SSH_USERNAME@$REGISTRY_HOST" "oc version --client 2>&1 | grep 'Client Version' | awk '{print \$3}'")
+        oc_full_path='oc';
     fi
-    
+
+    if [[ "$OCBIN_LOCAL" -eq 1 ]]; then
+        echo "Checking '${oc_full_path}' CLI version on localhost" | tee -a "$OUTPUT_FILE"
+    else
+        echo "Checking '${oc_full_path}' CLI version on registry host" | tee -a "$OUTPUT_FILE"
+    fi
+
+    if [[ "$REGISTRY_HOST" == "localhost" ]]; then
+        current_version=$($oc_full_path version --client 2>&1 | grep 'Client Version' | awk '{print $3}')
+    else
+        if [[ "$OCBIN_LOCAL" -eq 1 ]]; then
+            current_version=$($oc_full_path version --client 2>&1 | grep 'Client Version' | awk '{print $3}')
+        else
+            current_version=$(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "$oc_full_path version --client 2>&1 | grep 'Client Version' | awk '{print \$3}'")
+        fi
+    fi
+
     if echo "$current_version" | grep -q "FIPS mode is enabled, but the required OpenSSL library is not available"; then
-        echo -e "${RED}Fail: 'oc' CLI fails due to FIPS mode.${NC}" | tee -a "$OUTPUT_FILE"
-        log "ERROR" "'oc' CLI fails due to FIPS mode. Current version output: $current_version"
+        echo -e "${RED}Fail: '${oc_full_path}' CLI fails due to FIPS mode.${NC}" | tee -a "$OUTPUT_FILE"
+        log "ERROR" "'${oc_full_path}' CLI fails due to FIPS mode. Current version output: $current_version"
         if [[ -n "$RHEL_VERSION" ]]; then
             log "INFO" "Make sure to grab the oc binary for RHEL $RHEL_VERSION found at:"
             log "INFO" "https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/$majorvar.$minorvar.$patchvar/openshift-client-linux-amd64-rhel$RHEL_VERSION-$majorvar.$minorvar.$patchvar.tar.gz"
@@ -494,18 +571,18 @@ check_oc_cli_version() {
         fi
         return 1
     elif version_gte "$current_version" "$required_version"; then
-        echo -e "${GREEN}Pass: 'oc' CLI version is compatible on $REGISTRY_HOST.${NC}" | tee -a "$OUTPUT_FILE"
-        log "INFO" "'oc' CLI version is compatible. Current version: $current_version"
+        echo -e "${GREEN}Pass: '${oc_full_path}' CLI version is compatible on $REGISTRY_HOST.${NC}" | tee -a "$OUTPUT_FILE"
+        log "INFO" "'${oc_full_path}oc' CLI version is compatible. Current version: $current_version"
     else
-        echo -e "${RED}Fail: 'oc' CLI version on $REGISTRY_HOST is $current_version but needs to be $required_version or newer.${NC}" | tee -a "$OUTPUT_FILE"
-        log "ERROR" "'oc' CLI version is incompatible. Current version: $current_version, Required version: $required_version"
-        log "INFO" "Solution: Download the binaries from https://mirror.openshift.com/pub/openshift-v$majorvar/x86_64/clients/ocp/$majorvar.$minorvar.$patchvar/"
+        echo -e "${RED}Fail: '${oc_full_path}' CLI version on $REGISTRY_HOST is $current_version but needs to be $required_version or newer.${NC}" | tee -a "$OUTPUT_FILE"
+        log "ERROR" "'${oc_full_path}' CLI version is incompatible. Current version: $current_version, Required version: $required_version"
+        log "INFO" "Solution: Download the binaries from https://mirror.openshift.com/pub/openshift-v$majorvar/x86_64/clients/ocp/$required_version/"
         log "INFO" "Run the following commands to make the binaries executable and available to everyone:"
         log "INFO" "chmod +x <binary>"
-        log "INFO" "sudo mv <binary> /usr/local/bin/"
+        log "INFO" "(optionally) sudo mv <binary> /usr/local/bin/"
     fi
     if [[ $VERBOSE -eq 1 ]]; then
-        log "INFO" "Registry Host: $REGISTRY_HOST, Desired oc CLI Version: $required_version, Actual: $current_version"
+        log "INFO" "Registry Host: $REGISTRY_HOST, Desired oc CLI Version: $required_version, Actual: $current_version, Local binaries: $OCBIN_LOCAL, full path: $oc_full_path"
     fi
     echo "" | tee -a "$OUTPUT_FILE"
 }
@@ -514,45 +591,131 @@ check_oc_cli_version() {
 check_oc_mirror_version() {
     echo -e "\n===============================================" | tee -a "$OUTPUT_FILE"
     local required_version="$OCP_VERSION"
-    local majorvar minorvar
+    local current_version majorvar minorvar oc_mirror_full_path
     majorvar=$(echo "$required_version" | cut -d. -f1)
     minorvar=$(echo "$required_version" | cut -d. -f2)
 
-    echo "Checking 'oc-mirror' CLI version on registry host" | tee -a "$OUTPUT_FILE"
+    if [ "$OC_MIRROR_PATH" != "" ]; then
+        oc_mirror_full_path="$OC_MIRROR_PATH";
+    else
+        oc_mirror_full_path='oc';
+    fi
+
+    if [[ "$OCBIN_LOCAL" -eq 1 ]]; then
+        echo "Checking '${oc_mirror_full_path}' CLI version on localhost" | tee -a "$OUTPUT_FILE"
+    else
+        echo "Checking '${oc_mirror_full_path}' CLI version on registry host" | tee -a "$OUTPUT_FILE"
+    fi
+
     if [[ "$REGISTRY_HOST" == "localhost" ]]; then
-        if command -v oc-mirror &> /dev/null; then
-            current_version=$(oc-mirror version 2>/dev/null | grep 'GitVersion' | awk -F '"' '{print $6}' | cut -d'.' -f1,2)
+        if command -v ${oc_mirror_full_path} &> /dev/null; then
+            current_version=$($oc_mirror_full_path version 2>/dev/null | grep 'GitVersion' | awk -F '"' '{print $7}' | cut -d'.' -f1,2)
         else
             current_version=""
         fi
     else
-        if ssh "$SSH_USERNAME@$REGISTRY_HOST" "command -v oc-mirror &> /dev/null"; then
-            current_version=$(ssh "$SSH_USERNAME@$REGISTRY_HOST" "oc-mirror version 2>/dev/null | grep 'GitVersion' | awk -F '\"' '{print \$6}' | cut -d'.' -f1,2")
+        if [[ "$OCBIN_LOCAL" -eq 1 ]]; then
+          if command -v ${oc_mirror_full_path} &> /dev/null; then
+                current_version=$($oc_mirror_full_path version 2>/dev/null | grep 'GitVersion' | awk -F '"' '{print $6}' | cut -d'.' -f1,2)
+            else
+                current_version=""
+            fi
         else
-            current_version=""
+            if ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "command -v oc-mirror &> /dev/null"; then
+                current_version=$(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "$oc_mirror_full_path version 2>/dev/null | grep 'GitVersion' | awk -F '\"' '{print \$6}' | cut -d'.' -f1,2")
+            else
+                current_version=""
+            fi
         fi
     fi
 
     if [[ -z "$current_version" ]]; then
         echo -e "${RED}Fail: 'oc-mirror' CLI is not installed.${NC}" | tee -a "$OUTPUT_FILE"
-        log "ERROR" "'oc-mirror' CLI is not installed."
-        log "INFO" "Solution: Download the binaries from https://mirror.openshift.com/pub/openshift-v$majorvar/x86_64/clients/ocp/$majorvar.$minorvar/"
+        log "ERROR" "'${oc_mirror_full_path}' CLI is not installed."
+        log "INFO" "Solution: Download the binaries from https://mirror.openshift.com/pub/openshift-v$majorvar/x86_64/clients/ocp/$majorvar.$minorvar.$patchvar/"
         log "INFO" "Run the following commands to make the binaries executable and available to everyone:"
         log "INFO" "chmod +x <binary>"
-        log "INFO" "sudo mv <binary> /usr/local/bin/"
-    elif version_gte "$current_version" "$required_version"; then
-        echo -e "${GREEN}Pass: 'oc-mirror' CLI version is compatible on $REGISTRY_HOST.${NC}" | tee -a "$OUTPUT_FILE"
-        log "INFO" "'oc-mirror' CLI version is compatible. Current version: $current_version"
+        log "INFO" "(optionally) sudo mv <binary> /usr/local/bin/"
+    elif version_gte "$current_version" "$majorvar.$minorvar"; then
+        echo -e "${GREEN}Pass: '${oc_mirror_full_path}' CLI version is compatible on $REGISTRY_HOST.${NC}" | tee -a "$OUTPUT_FILE"
+        log "INFO" "'${oc_mirror_full_path}' CLI version is compatible. Current version: $current_version"
     else
-        echo -e "${RED}Fail: 'oc-mirror' CLI version on $REGISTRY_HOST is $current_version but needs to be $required_version or newer.${NC}" | tee -a "$OUTPUT_FILE"
-        log "ERROR" "'oc-mirror' CLI version is incompatible. Current version: $current_version, Required version: $required_version"
-        log "INFO" "Solution: Download the binaries from https://mirror.openshift.com/pub/openshift-v$majorvar/x86_64/clients/ocp/$majorvar.$minorvar/"
+        echo -e "${RED}Fail: 'i${oc_mirror_full_path}' CLI version on $REGISTRY_HOST is $current_version but needs to be $required_version or newer.${NC}" | tee -a "$OUTPUT_FILE"
+        log "ERROR" "'${oc_mirror_full_path}' CLI version is incompatible. Current version: $current_version, Required version: $required_version"
+        log "INFO" "Solution: Download the binaries from https://mirror.openshift.com/pub/openshift-v$majorvar/x86_64/clients/ocp/$required_version/"
         log "INFO" "Run the following commands to make the binaries executable and available to everyone:"
         log "INFO" "chmod +x <binary>"
-        log "INFO" "sudo mv <binary> /usr/local/bin/"
+        log "INFO" "(optionally) sudo mv <binary> /usr/local/bin/"
     fi
     if [[ $VERBOSE -eq 1 ]]; then
-        log "INFO" "Registry Host: $REGISTRY_HOST, Desired oc-mirror CLI Version: $required_version, Actual: $current_version"
+        log "INFO" "Registry Host: $REGISTRY_HOST, Desired oc-mirror CLI Version: $majorvar.$minorvar, Actual: $current_version, Local binaries: $OCBIN_LOCAL, full path: $oc_mirror_full_path"
+    fi
+    echo "" | tee -a "$OUTPUT_FILE"
+}
+
+# Function to check if openshift-install binary is installed and version
+check_openshift_install_version() {
+    echo -e "\n===============================================" | tee -a "$OUTPUT_FILE"
+    local required_version="$OCP_VERSION"
+    local current_version majorvar minorvar openshift_install_full_path
+    majorvar=$(echo "$required_version" | cut -d. -f1)
+    minorvar=$(echo "$required_version" | cut -d. -f2)
+    patchvar=$(echo "$required_version" | cut -d. -f3)
+
+    if [ "$OPENSHIFT_INSTALL_PATH" != "" ]; then
+        openshift_install_full_path="$OPENSHIFT_INSTALL_PATH";
+    else
+        openshift_install_full_path='openshift-install';
+    fi
+
+    if [[ "$OCBIN_LOCAL" -eq 1 ]]; then
+        echo "Checking '${openshift_install_full_path}' CLI version on localhost" | tee -a "$OUTPUT_FILE"
+    else
+        echo "Checking '${openshift_install_full_path}' CLI version on registry host" | tee -a "$OUTPUT_FILE"
+    fi
+
+    if [[ "$REGISTRY_HOST" == "localhost" ]]; then
+        if command -v ${openshift_install_full_path} &> /dev/null; then
+            current_version=$($openshift_install_full_path version 2>/dev/null | head -1 | cut -d' ' -f2)
+        else
+            current_version=""
+        fi
+    else
+        if [[ "$OCBIN_LOCAL" -eq 1 ]]; then
+          if command -v ${openshift_install_full_path} &> /dev/null; then
+                current_version=$($openshift_install_full_path version 2>/dev/null | head -1 | cut -d' ' -f2)
+            else
+                current_version=""
+            fi
+        else
+            if ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "command -v openshift-install &> /dev/null"; then
+                current_version=$(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "$openshift_install_full_path version 2>/dev/null | head -1 | cut -d' ' -f2")
+            else
+                current_version=""
+            fi
+        fi
+    fi
+
+    if [[ -z "$current_version" ]]; then
+        echo -e "${RED}Fail: 'openshift-install' CLI is not installed.${NC}" | tee -a "$OUTPUT_FILE"
+        log "ERROR" "'${openshift_install_full_path}' CLI is not installed."
+        log "INFO" "Solution: Download the binaries from https://mirror.openshift.com/pub/openshift-v$majorvar/x86_64/clients/ocp/$majorvar.$minorvar.$patchvar/"
+        log "INFO" "Run the following commands to make the binaries executable and available to everyone:"
+        log "INFO" "chmod +x <binary>"
+        log "INFO" "(optionally) sudo mv <binary> /usr/local/bin/"
+    elif version_gte "$current_version" "$required_version"; then
+        echo -e "${GREEN}Pass: '${openshift_install_full_path}' CLI version is compatible on $REGISTRY_HOST.${NC}" | tee -a "$OUTPUT_FILE"
+        log "INFO" "'${openshift_install_full_path}' CLI version is compatible. Current version: $current_version"
+    else
+        echo -e "${RED}Fail: '${openshift_install_full_path}' CLI version on $REGISTRY_HOST is $current_version but needs to be $required_version or newer.${NC}" | tee -a "$OUTPUT_FILE"
+        log "ERROR" "'${openshift_install_full_path}' CLI version is incompatible. Current version: $current_version, Required version: $required_version"
+        log "INFO" "Solution: Download the binaries from https://mirror.openshift.com/pub/openshift-v$majorvar/x86_64/clients/ocp/$required_version/"
+        log "INFO" "Run the following commands to make the binaries executable and available to everyone:"
+        log "INFO" "chmod +x <binary>"
+        log "INFO" "(optionally) sudo mv <binary> /usr/local/bin/"
+    fi
+    if [[ $VERBOSE -eq 1 ]]; then
+        log "INFO" "Registry Host: $REGISTRY_HOST, Desired oc-mirror CLI Version: $required_version, Actual: $current_version, Local binaries: $OCBIN_LOCAL, full path: $openshift_install_full_path"
     fi
     echo "" | tee -a "$OUTPUT_FILE"
 }
@@ -619,7 +782,7 @@ check_registry_disk_space() {
     if [[ "$REGISTRY_HOST" == "localhost" ]]; then
         available_space=$(df -BG --output=avail "$REGISTRY_PATH" | tail -1 | tr -dc '0-9')
     else
-        available_space=$(ssh "$SSH_USERNAME@$REGISTRY_HOST" "df -BG --output=avail $REGISTRY_PATH | tail -1 | tr -dc '0-9'")
+        available_space=$(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "df -BG --output=avail $REGISTRY_PATH | tail -1 | tr -dc '0-9'")
     fi
 
     echo -e "${BLUE}Available space in $REGISTRY_PATH: ${available_space}GB${NC}" | tee -a "$OUTPUT_FILE"
@@ -646,8 +809,8 @@ check_registry_resources() {
         cpu_cores=$(nproc)
         memory_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
     else
-        cpu_cores=$(ssh "$SSH_USERNAME@$REGISTRY_HOST" "nproc")
-        memory_kb=$(ssh "$SSH_USERNAME@$REGISTRY_HOST" "grep MemTotal /proc/meminfo | awk '{print \$2}'")
+        cpu_cores=$(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "nproc")
+        memory_kb=$(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "grep MemTotal /proc/meminfo | awk '{print \$2}'")
     fi
 
     local memory_mb=$((memory_kb / 1024))
@@ -685,8 +848,8 @@ get_network_stats() {
         gateway=$(get_gateway)
         ping_result=$(ping -c 4 "$gateway" 2>&1)
     else
-        gateway=$(ssh "$SSH_USERNAME@$REGISTRY_HOST" "$(declare -f get_gateway); get_gateway")
-        ping_result=$(ssh "$SSH_USERNAME@$REGISTRY_HOST" "ping -c 4 $gateway" 2>&1)
+        gateway=$(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "$(declare -f get_gateway); get_gateway")
+        ping_result=$(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "ping -c 4 $gateway" 2>&1)
     fi
 
     packet_loss=$(echo "$ping_result" | grep -oP '\d+(?=% packet loss)')
@@ -711,7 +874,7 @@ check_ntp() {
     if [[ "$REGISTRY_HOST" == "localhost" ]]; then
         ntp_status=$(timedatectl status)
     else
-        ntp_status=$(ssh "$SSH_USERNAME@$REGISTRY_HOST" "timedatectl status")
+        ntp_status=$(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "timedatectl status")
     fi
 
     if echo "$ntp_status" | grep -q "NTP service: active"; then
@@ -741,7 +904,7 @@ check_certificates() {
             return 1
         fi
     else
-        if ssh "$SSH_USERNAME@$REGISTRY_HOST" "[[ -f $CERT_PATH ]]"; then
+        if ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" "[[ -f $CERT_PATH ]]"; then
             echo -e "${GREEN}Pass: Certificate found at $CERT_PATH.${NC}" | tee -a "$OUTPUT_FILE"
             log "INFO" "Certificate found at $CERT_PATH."
         else
@@ -760,7 +923,7 @@ check_umask() {
     if [[ "$REGISTRY_HOST" == "localhost" ]]; then
         current_umask=$(umask)
     else
-        current_umask=$(ssh "$SSH_USERNAME@$REGISTRY_HOST" 'umask')
+        current_umask=$(ssh $SSH_OPTS "$SSH_USERNAME@$REGISTRY_HOST" 'umask')
     fi
     if [[ "$current_umask" != "0022" ]]; then
         echo -e "${RED}Fail: Current umask on $REGISTRY_HOST is set to $current_umask. OpenShift requires a umask of 0022.${NC}" | tee -a "$OUTPUT_FILE"
@@ -808,6 +971,7 @@ run_checks() {
     check_registry_accessibility
     check_oc_cli_version
     check_oc_mirror_version
+    check_openshift_install_version
     check_dns_entries
     check_registry_disk_space
     check_registry_resources
